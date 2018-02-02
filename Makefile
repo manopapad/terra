@@ -78,7 +78,7 @@ CPPFLAGS += -std=c++11
 endif
 
 
-ifeq ($(UNAME), Linux)
+ifneq ($(findstring $(UNAME), Linux FreeBSD),)
 DYNFLAGS = -shared -fPIC
 TERRA_STATIC_LIBRARY += -Wl,-export-dynamic -Wl,--whole-archive $(LIBRARY) -Wl,--no-whole-archive
 else
@@ -98,7 +98,22 @@ ifneq (,$(findstring $(LLVM_VERSION),$(CLANG_REWRITE_CORE)))
 LLVM_LIBRARY_FLAGS += -lclangRewriteCore
 endif
 
-LLVM_LIBRARY_FLAGS += $(shell $(LLVM_CONFIG) --libs)
+# by default, Terra includes only the pieces of the LLVM libraries it needs,
+#  but this can be a problem if third-party-libraries that also need LLVM are
+#  used - allow the user to request that some/all of the LLVM components be
+#  included and re-exported in their entirety
+LLVM_LIBS += $(shell $(LLVM_CONFIG) --libs)
+ifneq ($(REEXPORT_LLVM_COMPONENTS),)
+  REEXPORT_LIBS := $(shell $(LLVM_CONFIG) --libs $(REEXPORT_LLVM_COMPONENTS))
+  ifneq ($(findstring $(UNAME), Linux FreeBSD),)
+    LLVM_LIBRARY_FLAGS += -Wl,--whole-archive $(REEXPORT_LIBS) -Wl,--no-whole-archive
+  else
+    LLVM_LIBRARY_FLAGS += $(REEXPORT_LIBS:%=-Wl,-force_load,%)
+  endif
+  LLVM_LIBRARY_FLAGS += $(filter-out $(REEXPORT_LIBS),$(LLVM_LIBS))
+else
+  LLVM_LIBRARY_FLAGS += $(LLVM_LIBS)
+endif
 
 # llvm sometimes requires ncurses and libz, check if they have the symbols, and add them if they do
 ifeq ($(shell nm $(LLVM_PREFIX)/lib/libLLVMSupport.a | grep setupterm 2>&1 >/dev/null; echo $$?), 0)
@@ -110,6 +125,9 @@ endif
 
 ifeq ($(UNAME), Linux)
 SUPPORT_LIBRARY_FLAGS += -ldl -pthread
+endif
+ifeq ($(UNAME), FreeBSD)
+SUPPORT_LIBRARY_FLAGS += -lexecinfo -pthread
 endif
 
 PACKAGE_DEPS += $(LUAJIT_LIB)
@@ -154,10 +172,10 @@ BIN2C = build/bin2c
 #put any install-specific stuff in here
 -include Makefile.inc
 
-.PHONY:	all clean purge test release install
+.PHONY:	all clean download purge test release install
 all:	$(EXECUTABLE) $(DYNLIBRARY)
 
-test:	$(EXECUTABLE)
+test:	all
 	(cd tests; ./run)
 
 variants:	$(LIBRARY_VARIANTS)
@@ -168,6 +186,8 @@ build/%.o:	src/%.cpp $(PACKAGE_DEPS)
 build/%.o:	src/%.c $(PACKAGE_DEPS)
 	$(CC) $(FLAGS) $< -c -o $@
 
+download: build/$(LUAJIT_TAR)
+
 build/$(LUAJIT_TAR):
 ifeq ($(UNAME), Darwin)
 	curl $(LUAJIT_URL) -o build/$(LUAJIT_TAR)
@@ -177,7 +197,7 @@ endif
 
 build/lib/libluajit-5.1.a: build/$(LUAJIT_TAR)
 	(cd build; tar -xf $(LUAJIT_TAR))
-	(cd $(LUAJIT_DIR); make install PREFIX=$(realpath build) CC=$(CC) STATIC_CC="$(CC) -fPIC")
+	(cd $(LUAJIT_DIR); $(MAKE) install PREFIX=$(realpath build) CC=$(CC) STATIC_CC="$(CC) -fPIC")
 
 release/include/terra/%.h:  $(LUAJIT_INCLUDE)/%.h $(LUAJIT_LIB) 
 	cp $(LUAJIT_INCLUDE)/$*.h $@
@@ -264,6 +284,6 @@ build/%.d:	src/%.c $(PACKAGE_DEPS) $(GENERATEDHEADERS)
 	@$(CC) $(FLAGS) -w -MM -MT '$@ $(@:.d=.o)' $< -o $@
 
 #if we are cleaning, then don't include dependencies (which would require the header files are built)	
-ifeq ($(findstring $(MAKECMDGOALS),purge clean release),)
+ifeq ($(findstring $(MAKECMDGOALS),download purge clean release),)
 -include $(DEPENDENCIES)
 endif
