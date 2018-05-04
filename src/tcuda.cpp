@@ -20,7 +20,9 @@ extern "C" {
 #include "tllvmutil.h"
 #include "tobj.h"
 #include "cudalib.h"
+#include <fstream>
 #include <sstream>
+#include <stdlib.h>
 #ifndef _WIN32
 #include <unistd.h>
 #endif
@@ -127,9 +129,22 @@ void moduleToPTX(terra_State * T, llvm::Module * M, int major, int minor, std::s
         foutput << *M;
         #endif
     }
-    
+
     nvvmProgram prog;
     CUDA_DO(T->cuda->nvvmCreateProgram(&prog));
+
+    // Add libdevice module first
+    const char* libdeviceFileName = getenv("LIBDEVICE");
+    if (libdeviceFileName != NULL) {
+      std::ifstream libdeviceFile(libdeviceFileName);
+      std::stringstream sstr;
+      sstr << libdeviceFile.rdbuf();
+      std::string libdeviceStr = sstr.str();
+      size_t libdeviceModSize = libdeviceStr.size();
+      const char* libdeviceMod = libdeviceStr.data();
+      CUDA_DO(T->cuda->nvvmAddModuleToProgram(prog, libdeviceMod, libdeviceModSize, "libdevice"));
+    }
+
     CUDA_DO(T->cuda->nvvmAddModuleToProgram(prog, llvmir.data(), llvmir.size(), M->getModuleIdentifier().c_str()));
     int numOptions = 1;
     const char * options[] = { deviceopt.c_str() };
