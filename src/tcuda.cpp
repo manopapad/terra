@@ -23,6 +23,9 @@ extern "C" {
 #include <fstream>
 #include <sstream>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/types.h>
+#include <dirent.h>
 #ifndef _WIN32
 #include <unistd.h>
 #endif
@@ -134,8 +137,35 @@ void moduleToPTX(terra_State * T, llvm::Module * M, int major, int minor, std::s
     CUDA_DO(T->cuda->nvvmCreateProgram(&prog));
 
     // Add libdevice module first
-    const char* libdeviceFileName = getenv("LIBDEVICE");
-    if (libdeviceFileName != NULL) {
+    std::string libdeviceFileName;
+    const char* cudaHome = getenv("CUDA_HOME");
+    if (cudaHome != NULL) {
+      std::string libdeviceDirName = cudaHome;
+      libdeviceDirName.append("/nvvm/libdevice");
+      DIR* libdeviceDir = opendir(libdeviceDirName.data());
+      struct dirent* dp;
+      while ((dp = readdir(libdeviceDir)) != NULL) {
+        if (strstr(dp->d_name, "libdevice") != dp->d_name) {
+          continue;
+        }
+        const char* p = strstr(dp->d_name, "compute_");
+        if (p == NULL) {
+          // format: libdevice.10.bc
+          libdeviceFileName = libdeviceDirName + "/" + dp->d_name;
+          break;
+        }
+        // format: libdevice.compute_xy.10.bc
+        int libdeviceMajor = p[sizeof("compute_") - 1] - '0';
+        int libdeviceMinor = p[sizeof("compute_")] - '0';
+        int libdeviceVersion = libdeviceMajor * 10 + libdeviceMinor;
+        if (libdeviceVersion <= nversion) {
+          libdeviceFileName = libdeviceDirName + "/" + dp->d_name;
+          break;
+        }
+      }
+      closedir(libdeviceDir);
+    }
+    if (!libdeviceFileName.empty()) {
       std::ifstream libdeviceFile(libdeviceFileName);
       std::stringstream sstr;
       sstr << libdeviceFile.rdbuf();
