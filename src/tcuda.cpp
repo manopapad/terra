@@ -22,10 +22,6 @@ extern "C" {
 #include "cudalib.h"
 #include <fstream>
 #include <sstream>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/types.h>
-#include <dirent.h>
 #ifndef _WIN32
 #include <unistd.h>
 #endif
