@@ -73,8 +73,31 @@ function cudalib.toptx(module,dumpmodule,version)
             end
         end
     end
+
+    -- Find libdevice module
+    local libdevice
+    local libdevice_version
+    local dir = terra.cudahome..(ffi.os == 'Windows' and '\\nvvm\\libdevice' or '/nvvm/libdevice')
+    local cmd = ffi.os == 'Windows' and 'dir "'..dir..'" /b' or 'ls "'..dir..'"'
+    local pfile = io.popen(cmd)
+    for fname in pfile:lines() do
+        if fname:match('^libdevice%.10%.bc$') then
+            libdevice = dir..(ffi.os == 'Windows' and '\\' or '/')..fname
+            break
+        end
+        local x, y = fname:match('^libdevice%.compute_([0-9])([0-9])%.10%.bc$')
+        if x and y then
+            local v = 10 * x + y
+            if v <= version and (not libdevice or v > libdevice_version) then
+                libdevice = dir..(ffi.os == 'Windows' and '\\' or '/')..fname
+                libdevice_version = v
+            end
+        end
+    end
+    pfile:close()
+
     --call into tcuda.cpp to perform compilation
-    local r = terralib.toptximpl(cu,annotations,dumpmodule,version)
+    local r = terralib.toptximpl(cu,annotations,dumpmodule,version,libdevice)
     cu:free()
     return r
 end

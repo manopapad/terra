@@ -98,7 +98,7 @@ public:
 };
 #endif
 
-void moduleToPTX(terra_State * T, llvm::Module * M, int major, int minor, std::string * buf) {
+void moduleToPTX(terra_State * T, llvm::Module * M, int major, int minor, std::string * buf, const char * libdevice) {
     
 #if LLVM_VERSION <= 38
     for(llvm::Module::iterator it = M->begin(), end = M->end(); it != end; ++it) {
@@ -137,36 +137,8 @@ void moduleToPTX(terra_State * T, llvm::Module * M, int major, int minor, std::s
     CUDA_DO(T->cuda->nvvmCreateProgram(&prog));
 
     // Add libdevice module first
-    std::string libdeviceFileName;
-    const char* cudaHome = getenv("CUDA_HOME");
-    if (cudaHome != NULL) {
-      std::string libdeviceDirName = cudaHome;
-      libdeviceDirName.append("/nvvm/libdevice");
-      DIR* libdeviceDir = opendir(libdeviceDirName.data());
-      struct dirent* dp;
-      while ((dp = readdir(libdeviceDir)) != NULL) {
-        if (strstr(dp->d_name, "libdevice") != dp->d_name) {
-          continue;
-        }
-        const char* p = strstr(dp->d_name, "compute_");
-        if (p == NULL) {
-          // format: libdevice.10.bc
-          libdeviceFileName = libdeviceDirName + "/" + dp->d_name;
-          break;
-        }
-        // format: libdevice.compute_xy.10.bc
-        int libdeviceMajor = p[sizeof("compute_") - 1] - '0';
-        int libdeviceMinor = p[sizeof("compute_")] - '0';
-        int libdeviceVersion = libdeviceMajor * 10 + libdeviceMinor;
-        if (libdeviceVersion <= nversion) {
-          libdeviceFileName = libdeviceDirName + "/" + dp->d_name;
-          break;
-        }
-      }
-      closedir(libdeviceDir);
-    }
-    if (!libdeviceFileName.empty()) {
-      std::ifstream libdeviceFile(libdeviceFileName);
+    if (libdevice != NULL) {
+      std::ifstream libdeviceFile(libdevice);
       std::stringstream sstr;
       sstr << libdeviceFile.rdbuf();
       std::string libdeviceStr = sstr.str();
@@ -220,6 +192,7 @@ int terra_toptx(lua_State * L) {
     int version = lua_tonumber(L,4);
     int major = version / 10;
     int minor = version % 10;
+    const char * libdevice = lua_tostring(L,5);
 
     int N = lua_objlen(L,annotations);
     for(int i = 0; i < N; i++) {
@@ -253,7 +226,7 @@ int terra_toptx(lua_State * L) {
     }
 	
     std::string ptx;
-    moduleToPTX(T,M,major,minor,&ptx);
+    moduleToPTX(T,M,major,minor,&ptx,libdevice);
     if(dumpmodule) {
         fprintf(stderr,"CUDA Module:\n");
         M->dump();
