@@ -49,6 +49,10 @@ ifeq ($(shell sed -E '' </dev/null >/dev/null 2>&1 && echo yes || echo no),no)
 SED_E = sed -r
 endif
 
+TERRA_VERSION_RAW=$(shell git describe --tags 2>/dev/null || echo unknown)
+TERRA_VERSION=$(shell echo "$(TERRA_VERSION_RAW)" | $(SED_E) 's/^release-//')
+FLAGS += -DTERRA_VERSION_STRING="\"$(TERRA_VERSION)\""
+
 # Add the following lines to Makefile.inc to switch to LuaJIT-2.1 beta releases
 #LUAJIT_VERSION_BASE =2.1
 #LUAJIT_VERSION_EXTRA =.0-beta2
@@ -83,7 +87,7 @@ ifneq ($(findstring $(UNAME), Linux FreeBSD),)
 DYNFLAGS = -shared -fPIC
 TERRA_STATIC_LIBRARY += -Wl,-export-dynamic -Wl,--whole-archive $(LIBRARY) -Wl,--no-whole-archive
 else
-DYNFLAGS = -dynamiclib -single_module -fPIC -install_name "@rpath/terra.so"
+DYNFLAGS = -dynamiclib -single_module -fPIC -install_name "@rpath/terra.dylib"
 TERRA_STATIC_LIBRARY =  -Wl,-force_load,$(LIBRARY)
 endif
 
@@ -170,7 +174,11 @@ LIBRARY = release/lib/libterra.a
 LIBRARY_NOLUA = release/lib/libterra_nolua.a
 LIBRARY_NOLUA_NOLLVM = release/lib/libterra_nolua_nollvm.a
 LIBRARY_VARIANTS = $(LIBRARY_NOLUA) $(LIBRARY_NOLUA_NOLLVM)
+ifeq ($(UNAME), Darwin)
+DYNLIBRARY = release/lib/terra.dylib
+else
 DYNLIBRARY = release/lib/terra.so
+endif
 RELEASE_HEADERS = $(addprefix release/include/terra/,$(LUAHEADERS))
 BIN2C = build/bin2c
 
@@ -250,9 +258,10 @@ $(BIN2C):	src/bin2c.c
 
 
 #rule for packaging lua code into a header file
-# fix narrowing warnings by using unsigned char
-build/%.h:	src/%.lua $(PACKAGE_DEPS)
-	$(LUAJIT) -bg $< -t h - > $@
+build/%.bc:	src/%.lua $(PACKAGE_DEPS)
+	$(LUAJIT) -bg $< $@
+build/%.h:	build/%.bc $(PACKAGE_DEPS)
+	$(LUAJIT) src/genheader.lua $< $@
 
 #run clang on a C file to extract the header search paths for this architecture
 #genclangpaths.lua find the path arguments and formats them into a C file that is included by the cwrapper
